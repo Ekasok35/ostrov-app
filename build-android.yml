@@ -1,0 +1,76 @@
+name: Build OSTROV Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ostrov_app_source.zip"
+      - ".github/workflows/build-android.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check source archive
+        run: |
+          if [ ! -f ostrov_app_source.zip ]; then
+            echo "Файл ostrov_app_source.zip не найден в корне репозитория."
+            echo "Сначала загрузите архив исходников OSTROV в корень репозитория."
+            exit 1
+          fi
+
+      - name: Extract source
+        run: |
+          mkdir extracted
+          unzip -q ostrov_app_source.zip -d extracted
+          test -f extracted/ostrov_app/pubspec.yaml
+          test -f extracted/ostrov_app/lib/main.dart
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project
+        run: |
+          flutter create --org ru.ostrov --project-name ostrov --platforms=android build/ostrov
+          cp extracted/ostrov_app/pubspec.yaml build/ostrov/pubspec.yaml
+          cp extracted/ostrov_app/analysis_options.yaml build/ostrov/analysis_options.yaml
+          rm -rf build/ostrov/lib
+          cp -R extracted/ostrov_app/lib build/ostrov/lib
+          if [ -d extracted/ostrov_app/test ]; then
+            rm -rf build/ostrov/test
+            cp -R extracted/ostrov_app/test build/ostrov/test
+          fi
+          if [ -f extracted/ostrov_app/android/app/src/main/AndroidManifest.xml ]; then
+            cp extracted/ostrov_app/android/app/src/main/AndroidManifest.xml build/ostrov/android/app/src/main/AndroidManifest.xml
+          fi
+
+      - name: Get dependencies
+        working-directory: build/ostrov
+        run: flutter pub get
+
+      - name: Run tests
+        working-directory: build/ostrov
+        run: flutter test
+
+      - name: Build release APK
+        working-directory: build/ostrov
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ostrov-android-apk
+          path: build/ostrov/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
